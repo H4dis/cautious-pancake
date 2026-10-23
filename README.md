@@ -251,6 +251,6 @@ MIT License — see `LICENSE` for details.
 
 ## 🙏 Acknowledgments
 
-- Built on top of [VerilyAI](https://github.com/RAG-System) (original Streamlit RAG template).
+- Built on top of [](https://github.com/RAG-System) (original Streamlit RAG template).
 - Inspired by LangChain's structured output examples.
 - Thanks to the Datheon team for the task specifications.

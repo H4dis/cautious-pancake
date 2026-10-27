@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from embeddings import APINinjasEmbeddings, VectorDiskCache
 from vector_store import get_vectorstore, Manifest, drop_workspace, delete_source, retrieve
-from rag_engine import build_llm, Turn, condense_question, to_passages, build_messages, stream_answer, describe_library
+from rag_engine import build_llm, Turn, condense_question, to_passages, build_messages, stream_answer, describe_library, summarize_document
 from prompts import build_system_prompt
 from pipeline import ingest_sources
 
@@ -23,7 +23,6 @@ st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="wide", init
 
 
 def inject_brand_css():
-    # (همان کدهای CSS قبلی را اینجا قرار بده)
     pass
 
 
@@ -97,8 +96,13 @@ def render_sidebar(vectorstore, manifest: Manifest, workspace_id: str) -> None:
             for record in sorted(manifest.records.values(), key=lambda r: r.ingested_at, reverse=True):
                 icon = "🌐" if record.kind == "web" else "📄"
                 left, right = st.columns([5, 1])
+
                 with left:
                     st.markdown(f"{icon} **{record.title}**")
+                    if st.button("📝 Summarize", key=f"sum_{record.source_id}"):
+                        st.session_state.pending_question = f"__SUMMARIZE__:{record.title}"
+                        st.rerun()
+
                 with right:
                     if st.button("✕", key=f"del_{record.source_id}", use_container_width=True):
                         try:
@@ -142,6 +146,19 @@ def collect_citations(answer: str, passages) -> list[str]:
 
 
 def answer_question(question: str, vectorstore, manifest: Manifest, llm) -> None:
+    if question.startswith("__SUMMARIZE__:"):
+        filename = question.split(":", 1)[1]
+        with st.chat_message("user"):
+            st.markdown(f"Summarize: **{filename}**")
+        with st.chat_message("assistant"):
+            try:
+                summary_stream = summarize_document(llm, vectorstore, filename)
+                answer = st.write_stream(summary_stream)
+                st.session_state.turns.append(Turn(question=f"Summarize {filename}", answer=answer))
+            except Exception as exc:
+                st.error(f"Summarization error: {exc}")
+        return
+
     with st.chat_message("user"):
         st.markdown(question)
 
@@ -150,7 +167,6 @@ def answer_question(question: str, vectorstore, manifest: Manifest, llm) -> None
         try:
             with st.spinner("Searching…"):
                 search_query = condense_question(llm, question, st.session_state.turns)
-                from vector_store import retrieve
                 scored = retrieve(vectorstore, search_query)
                 passages = to_passages(scored)
         except Exception as exc:

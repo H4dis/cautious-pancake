@@ -23,7 +23,6 @@ def build_llm(api_key: str, *, model: str = CHAT_MODEL, temperature: float = 0.2
         return ChatOpenAI(
             model=model,
             api_key=api_key,
-            base_url="https://api.gapgpt.app/v1",
             temperature=temperature,
             max_tokens=2048,
         )

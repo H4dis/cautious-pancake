@@ -54,7 +54,7 @@ class RAGAgent:
             ("human", "{input}")
         ])
 
-        retriever = self._vectorstore.as_retriever(search_kwargs={"k": 6})
+        retriever = self._vectorstore.as_retriever(search_kwargs={"k": 20 })
 
         history_aware_retriever = create_history_aware_retriever(
             self._llm, retriever, rewrite_prompt
@@ -115,8 +115,6 @@ def answer_with_full_context(llm, vectorstore, filename: str, question: str) -> 
             yield "No content found."
             return
         full_text = "\n\n".join(results["documents"])[:50000]
-        print(f"DEBUG: Full text length = {len(full_text)}")
-        print(f"DEBUG: Does it contain 'Abstract'? {'abstract' in full_text.lower()}")
         messages = [
             SystemMessage(content="Answer strictly from the document text."),
             HumanMessage(content=f"Document text:\n{full_text}\n\nQuestion: {question}")

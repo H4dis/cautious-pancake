@@ -141,7 +141,7 @@ def answer_question(question: str, vectorstore, manifest: Manifest, llm) -> None
     with st.chat_message("user"):
         st.markdown(question)
 
-    # حالت انتخاب رو بیرون از chat_message گذاشتیم تا قاطی نشه
+   
     mode = st.radio(
         "Answer mode",
         ["Vector Search (Fast)", "Full Document (Accurate)"],
@@ -152,7 +152,7 @@ def answer_question(question: str, vectorstore, manifest: Manifest, llm) -> None
 
     with st.chat_message("assistant"):
         if mode == "Full Document (Accurate)":
-            # حالت متن کامل
+           
             filename = list(manifest.records.values())[0].title if manifest.records else ""
             stream = answer_with_full_context(llm, vectorstore, filename, question)
             answer = st.write_stream(stream)
@@ -202,7 +202,7 @@ def main() -> None:
     try:
         embeddings = get_embeddings(settings.api_ninjas_key)
         vectorstore = get_vectorstore(workspace_id, embeddings)
-        llm = get_llm(settings.gapgpt_api_key)
+        llm = get_llm(settings.openai_api_key)
     except Exception as exc:
         st.error(str(exc))
         st.stop()

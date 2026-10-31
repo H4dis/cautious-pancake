@@ -130,7 +130,7 @@ Alternatively, for Streamlit Cloud deployment, create `.streamlit/secrets.toml`:
 
 ```toml
 API_NINJAS_KEY = "your_api_ninjas_key_here"
-GAPGPT_API_KEY = "your_gapgpt_key_here"
+OPENAI_API_KEY = "your_openai_key_here"
 ```
 
 > ⚠️ **Never commit `.env` or `secrets.toml` to Git.** Add them to `.gitignore`.
@@ -166,15 +166,18 @@ Then open [http://localhost:8501](http://localhost:8501) in your browser.
 ## 📁 Project Structure
 
 ```
-verily-ai/
-├── app.py                          # Main Streamlit app + RAG pipeline
-├── requirements.txt                # Python dependencies
-├── .env                            # API keys (gitignored)
-├── .streamlit/
-│   └── secrets.toml                # Streamlit Cloud secrets (gitignored)
-├── .gitignore
-├── README.md
-└── .arzens_data/                   # Local ChromaDB + cache (gitignored)
+ai/
++-- app.py                  # Main Streamlit app
++-- config.py               # Settings and API keys
++-- rag_engine.py           # RAG chain, memory, and streaming
++-- vector_store.py         # ChromaDB and Reranking
++-- prompts.py              # System prompts
++-- pipeline.py             # PDF ingestion
++-- tests/
+|   +-- test_rag.py         # Basic unit tests
++-- requirements.txt
++-- README.md
++-- .arzens_data/           # Local ChromaDB + cache (gitignored)
 ```
 
 ---
@@ -187,53 +190,36 @@ LangChain provides a unified interface across providers (OpenAI, Gemini, GapGPT)
 ### Why ChromaDB instead of FAISS?
 ChromaDB has a simpler API for persistence, supports metadata filtering out of the box, and integrates natively with LangChain. FAISS is faster for very large datasets but requires manual persistence.
 
-### Why chunk size 1200 / overlap 180?
-- **1200 chars** ≈ 300 tokens, well within most embedding model limits (5000 char cap on API Ninjas).
-- **180 char overlap** preserves context across chunk boundaries (e.g., a sentence split across two chunks).
-- This is a balanced default; for dense technical PDFs, reduce to 800/100.
+### Why Reranking?
+Retrieval with a bi-encoder (ChromaDB) can return irrelevant chunks. A Cross-Encoder reranks the top 20 candidates and passes only the top 4 to the LLM, improving accuracy and reducing hallucinations.
 
-### Why `st.write_stream` for streaming?
-Streamlit's native `st.write_stream` accepts any Python generator and renders tokens as they arrive. This is cleaner than manually managing `placeholder.markdown()` loops, and works with LangChain's `.stream()` out of the box.
 
-### Why separate providers for Embedding and LLM?
-GapGPT (chosen for LLM due to Iran accessibility) does not offer an Embeddings endpoint. API Ninjas offers Embeddings but not Chat. Using two providers keeps each service doing what it does best. This is documented in `DECISIONS.md` (see below).
-
----
 
 ## ⚠️ Known Limitations
 
-| Limitation | Impact | Workaround |
-|------------|--------|------------|
-| **Scanned PDFs not supported** | Image-based PDFs return "no extractable text" | Run OCR first (e.g., Adobe Acrobat, iLovePDF) |
-| **JavaScript-heavy URLs fail** | `requests` can't execute JS | Save page as PDF, then upload |
-| **API Ninjas: 5000 char limit** | Very long chunks may be truncated | Keep chunk size ≤ 1200 |
-| **API Ninjas: monthly quota** | Free tier limited | Use Hugging Face local embeddings |
-| **GapGPT: no Embeddings** | Cannot use one provider for both | Two-provider setup (documented above) |
-| **Single-file app.py** | ~2200 lines, hard to navigate | Split into `rag.py` + `ui.py` (future work) |
-
+Limitation	Impact	Workaround
+Scanned PDFs not supported	Image-based PDFs return "no extractable text"	Run OCR first
+JavaScript-heavy URLs fail	requests can't execute JS	Save page as PDF
+API Ninjas: 5000 char limit	Very long chunks may be truncated	Keep chunk size <= 1200
+Troubleshooting
 ---
 
 ## 🔧 Troubleshooting
 
-### `No Gemini API key found` or `No API Ninjas key found`
-- Check that `.env` or `.streamlit/secrets.toml` exists and contains the exact key name.
-- Variable names are **case-sensitive**: `API_NINJAS_KEY` ≠ `api_ninjas_key`.
-- Try adding a debug print in `resolve_api_ninjas_key()`:
-  ```python
-  print(f"DEBUG: value length = {len(value) if value else 0}")
-  ```
+No API Ninjas key found / No OpenAI key found
+Check that .env or .streamlit/secrets.toml contains the exact variable names.
 
-### `contains no extractable text`
-- Your PDF is scanned. Run it through OCR first.
-- Or test with a text-based PDF (e.g., an arXiv paper).
+Variable names are case-sensitive: OPENAI_API_KEY != openai_api_key.
 
-### `429 Too Many Requests`
-- API Ninjas free tier quota exhausted.
-- Wait a minute, or switch to Hugging Face local embeddings.
+contains no extractable text
+Your PDF is scanned. Run it through OCR first.
 
-### `missing ScriptRunContext`
-- You ran `python app.py` instead of `streamlit run app.py`.
-- Streamlit requires its own runner.
+429 Too Many Requests
+API Ninjas quota exhausted. Wait a minute.
+
+missing ScriptRunContext
+Run streamlit run app.py, not python app.py.
+
 
 ---
 

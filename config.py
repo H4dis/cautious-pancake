@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import os
@@ -7,29 +6,18 @@ from pathlib import Path
 
 import streamlit as st
 
-
-
-
-
-
 CHAT_MODEL = "gpt-4o-mini"
-
-#
 EMBEDDING_MODEL = "api-ninjas-embeddings"
 EMBEDDING_DIMENSIONS = 768
 
-
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 180
-
 
 RETRIEVAL_K = 20
 RERANK_TOP_N = 4
 RELEVANCE_FLOOR = 0.30
 
-
 HISTORY_TURNS = 12
-
 
 MAX_PDF_MB = 25
 MAX_PDFS_PER_UPLOAD = 10
@@ -76,45 +64,16 @@ class ConfigError(ArzensError):
     default_message = "The app is not configured correctly."
 
 
-
-
-
-#class ConfigError(Exception):
-    """Base class. Anything the UI catches is one of these."""
-
-   # default_message = "Something went wrong."
-
-    def __init__(
-        self,
-        user_message: str | None = None,
-        *,
-        hint: str | None = None,
-        cause: BaseException | None = None,
-    ) -> None:
-        self.user_message = user_message or self.default_message
-        self.hint = hint
-        self.cause = cause
-        super().__init__(self.user_message)
-
-    def display(self) -> str:
-        return f"{self.user_message}\n\n{self.hint}" if self.hint else self.user_message
-
-
-
-
-
-
 @dataclass(frozen=True)
 class Settings:
     api_ninjas_key: str
-    gapgpt_api_key: str
+    openai_api_key: str 
     chat_model: str = CHAT_MODEL
     embedding_model: str = EMBEDDING_MODEL
     data_dir: Path = field(default=DATA_DIR)
 
 
 def _from_streamlit_secrets(name: str) -> str | None:
-
     try:
         value = st.secrets.get(name)  # type: ignore[union-attr]
     except Exception:
@@ -139,19 +98,19 @@ def resolve_api_ninjas_key() -> str:
     )
 
 
-def resolve_gapgpt_api_key() -> str:
+def resolve_openai_api_key() -> str:  
     for getter in (
-        lambda: _from_streamlit_secrets("GAPGPT_API_KEY"),
-        lambda: os.environ.get("GAPGPT_API_KEY"),
+        lambda: _from_streamlit_secrets("OPENAI_API_KEY"),  
+        lambda: os.environ.get("OPENAI_API_KEY"),       
     ):
         value = getter()
         if value and value.strip():
             return value.strip()
     raise ConfigError(
-        "No GapGPT key found.",
+        "No OpenAI key found.",
         hint=(
-            "Add GAPGPT_API_KEY to your .env or .streamlit/secrets.toml.\n"
-            'Example: GAPGPT_API_KEY = "your-key-here"'
+            "Add OPENAI_API_KEY to your .env or .streamlit/secrets.toml.\n"
+            'Example: OPENAI_API_KEY = "your-key-here"'
         ),
     )
 
@@ -159,10 +118,8 @@ def resolve_gapgpt_api_key() -> str:
 def get_settings() -> Settings:
     return Settings(
         api_ninjas_key=resolve_api_ninjas_key(),
-        gapgpt_api_key=resolve_gapgpt_api_key(),
+        openai_api_key=resolve_openai_api_key(),  
     )
-
-
 
 
 def ensure_directories() -> None:

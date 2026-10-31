@@ -2,28 +2,18 @@ from __future__ import annotations
 import secrets
 import re
 import streamlit as st
-from config import (
-    APP_TITLE,
-    ConfigError,
-    get_settings,
-    DATA_DIR,
-    CHROMA_DIR,
-)
+from config import APP_TITLE, ConfigError, get_settings, DATA_DIR, CHROMA_DIR
 from dotenv import load_dotenv
+
 load_dotenv()
 from embeddings import APINinjasEmbeddings, VectorDiskCache
-from vector_store import get_vectorstore, Manifest, drop_workspace, delete_source, retrieve
-from rag_engine import build_llm, Turn, condense_question, to_passages, build_messages, stream_answer, describe_library, summarize_document
-from prompts import build_system_prompt
+from vector_store import get_vectorstore, Manifest, drop_workspace, delete_source
+from rag_engine import build_llm, RAGAgent, summarize_document, answer_with_full_context
 from pipeline import ingest_sources
 
 APP_ICON = "📜"
 
 st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="wide", initial_sidebar_state="expanded")
-
-
-def inject_brand_css():
-    pass
 
 
 @st.cache_resource(show_spinner=False)
@@ -116,6 +106,8 @@ def render_sidebar(vectorstore, manifest: Manifest, workspace_id: str) -> None:
         with st.expander("Session"):
             if st.button("Clear chat", use_container_width=True):
                 st.session_state.turns = []
+                if "rag_agent" in st.session_state:
+                    st.session_state.rag_agent.reset("default_user")
                 st.rerun()
             if st.button("Delete everything", use_container_width=True):
                 drop_workspace(workspace_id)
@@ -127,22 +119,9 @@ def render_sidebar(vectorstore, manifest: Manifest, workspace_id: str) -> None:
 def render_history() -> None:
     for turn in st.session_state.turns:
         with st.chat_message("user"):
-            st.markdown(turn.question)
+            st.markdown(turn["question"])
         with st.chat_message("assistant"):
-            st.markdown(turn.answer)
-            if turn.citations:
-                with st.expander(f"Sources ({len(turn.citations)})"):
-                    for citation in turn.citations:
-                        st.markdown(f"- {citation}")
-
-
-def collect_citations(answer: str, passages) -> list[str]:
-    cited_numbers = {int(n) for n in re.findall(r"\[(\d{1,2})\]", answer)}
-    seen: list[str] = []
-    for passage in passages:
-        if passage.number in cited_numbers and passage.citation not in seen:
-            seen.append(passage.citation)
-    return seen
+            st.markdown(turn["answer"])
 
 
 def answer_question(question: str, vectorstore, manifest: Manifest, llm) -> None:
@@ -154,7 +133,7 @@ def answer_question(question: str, vectorstore, manifest: Manifest, llm) -> None
             try:
                 summary_stream = summarize_document(llm, vectorstore, filename)
                 answer = st.write_stream(summary_stream)
-                st.session_state.turns.append(Turn(question=f"Summarize {filename}", answer=answer))
+                st.session_state.turns.append({"question": f"Summarize {filename}", "answer": answer})
             except Exception as exc:
                 st.error(f"Summarization error: {exc}")
         return
@@ -162,42 +141,48 @@ def answer_question(question: str, vectorstore, manifest: Manifest, llm) -> None
     with st.chat_message("user"):
         st.markdown(question)
 
+    # حالت انتخاب رو بیرون از chat_message گذاشتیم تا قاطی نشه
+    mode = st.radio(
+        "Answer mode",
+        ["Vector Search (Fast)", "Full Document (Accurate)"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key=f"mode_{len(st.session_state.turns)}"  # کلید یکتا برای هر سوال
+    )
+
     with st.chat_message("assistant"):
-        passages = []
-        try:
-            with st.spinner("Searching…"):
-                search_query = condense_question(llm, question, st.session_state.turns)
-                scored = retrieve(vectorstore, search_query)
-                passages = to_passages(scored)
-        except Exception as exc:
-            st.error(f"Search error: {exc}")
-            return
+        if mode == "Full Document (Accurate)":
+            # حالت متن کامل
+            filename = list(manifest.records.values())[0].title if manifest.records else ""
+            stream = answer_with_full_context(llm, vectorstore, filename, question)
+            answer = st.write_stream(stream)
+            st.session_state.turns.append({"question": question, "answer": answer})
 
-        system_prompt = build_system_prompt(app_name=APP_TITLE,
-                                            library=describe_library([r.title for r in manifest.records.values()]))
-        messages = build_messages(system_prompt=system_prompt, history=st.session_state.turns, question=question,
-                                  passages=passages)
+        else:
+            # حالت جستجوی برداری
+            if "rag_agent" not in st.session_state:
+                st.session_state.rag_agent = RAGAgent(llm, vectorstore)
 
-        try:
-            answer = st.write_stream(stream_answer(llm, messages))
-        except Exception as exc:
-            st.error(f"Generation error: {exc}")
-            return
+            stream = st.session_state.rag_agent.stream_ask(
+                session_id="default_user",
+                question=question
+            )
+            answer = st.write_stream(stream)
 
-        answer = answer if isinstance(answer, str) else str(answer)
-        citations = collect_citations(answer, passages)
+            if answer and "(Source:" in answer:
+                st.session_state.turns.append({"question": question, "answer": answer})
 
-        if citations:
-            with st.expander(f"Sources ({len(citations)})", expanded=False):
-                for passage in passages:
-                    if passage.citation not in citations: continue
-                    st.markdown(f"**[{passage.number}] {passage.citation}**")
-                    st.caption(f"relevance {passage.score:.2f}")
-                    st.markdown(f"> {passage.text[:700]}...")
-                    st.divider()
-
-        st.session_state.turns.append(Turn(question=question, answer=answer, citations=citations))
-
+                with st.expander("Sources", expanded=False):
+                    with st.spinner("Loading context…"):
+                        docs = vectorstore.similarity_search(question, k=3)
+                        for i, doc in enumerate(docs):
+                            title = doc.metadata.get("title", "Unknown")
+                            page = doc.metadata.get("section", "N/A")
+                            st.markdown(f"**[{i + 1}] {title} (Page: {page})**")
+                            st.markdown(f"> {doc.page_content[:300]}...")
+                            st.divider()
+            else:
+                st.session_state.turns.append({"question": question, "answer": answer})
 
 def main() -> None:
     init_state()

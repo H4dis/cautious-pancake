@@ -1,11 +1,23 @@
 from __future__ import annotations
-
 import json
 import time
 from pathlib import Path
 from dataclasses import asdict, dataclass
-
+from typing import Optional
 from langchain_core.documents import Document
+from sentence_transformers import CrossEncoder
+import streamlit as st
+
+from config import CHROMA_DIR, MANIFEST_DIR, RETRIEVAL_K, RERANK_TOP_N, ArzensError
+
+_client = None
+
+class VectorStoreError(ArzensError):
+    default_message = "The knowledge base could not be opened."
+
+@st.cache_resource(show_spinner=False)
+def _get_reranker():
+    return CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 
 from config import (
     CHROMA_DIR,
@@ -162,9 +174,20 @@ def drop_workspace(workspace_id: str) -> None:
         manifest_path(workspace_id).unlink(missing_ok=True)
     except OSError:
         pass
+def get_vectorstore(workspace_id: str, embeddings):
+    from langchain_chroma import Chroma
+    try:
+        return Chroma(
+            client=get_client(),
+            collection_name=collection_name(workspace_id),
+            embedding_function=embeddings,
+            collection_metadata={"hnsw:space": "cosine"},
+            create_collection_if_not_exists=True,
+        )
+    except Exception as exc:
+        raise VectorStoreError("This session's knowledge base could not be opened.", cause=exc) from exc
 
-
-def retrieve(vectorstore, query: str, *, k: int = RETRIEVAL_K, floor: float = RELEVANCE_FLOOR) -> list[tuple[Document, float]]:
+def retrieve(vectorstore, query: str, *, k: int = RETRIEVAL_K, floor: float = 0.25) -> list[tuple[Document, float]]:
     if not query.strip():
         return []
     try:
@@ -172,4 +195,53 @@ def retrieve(vectorstore, query: str, *, k: int = RETRIEVAL_K, floor: float = RE
     except Exception as exc:
         raise VectorStoreError("The knowledge base could not be searched.", cause=exc) from exc
 
-    return [(doc, score) for doc, score in scored if score is None or score >= floor]
+
+    fixed_results = []
+    for doc, score in scored:
+        if "source" not in doc.metadata:
+            doc.metadata["source"] = doc.metadata.get("title", "Unknown")
+        if "page" not in doc.metadata:
+            doc.metadata["page"] = doc.metadata.get("section", "N/A")
+        fixed_results.append((doc, score))
+
+    filtered = [(doc, score) for doc, score in fixed_results if score is None or score >= floor]
+    if not filtered:
+        return []
+
+
+    reranker = _get_reranker()
+    pairs = [[query, doc.page_content] for doc, _ in filtered]
+    scores = reranker.predict(pairs)
+
+    ranked = [(doc, float(score)) for (doc, _), score in zip(filtered, scores)]
+    ranked.sort(key=lambda x: x[1], reverse=True)
+
+    return ranked[:RERANK_TOP_N]
+
+
+def retrieve(vectorstore, query: str, *, k: int = RETRIEVAL_K, floor: float = RELEVANCE_FLOOR) -> list[
+    tuple[Document, float]]:
+    if not query.strip():
+        return []
+    try:
+        scored = vectorstore.similarity_search_with_relevance_scores(query, k=k)
+    except Exception as exc:
+        raise VectorStoreError("The knowledge base could not be searched.", cause=exc) from exc
+
+    fixed_results = []
+    for doc, score in scored:
+        if "source" not in doc.metadata:
+            doc.metadata["source"] = doc.metadata.get("title", "Unknown")
+        if "page" not in doc.metadata:
+            doc.metadata["page"] = doc.metadata.get("section", "N/A")
+        fixed_results.append((doc, score))
+
+    filtered = [(doc, score) for doc, score in fixed_results if score is None or score >= floor]
+
+    if not filtered:
+        return []
+
+    from reranker import rerank_documents
+    from config import RERANK_TOP_N
+
+    return rerank_documents(query, filtered, top_n=RERANK_TOP_N)

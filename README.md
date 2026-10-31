@@ -28,12 +28,12 @@ A Retrieval-Augmented Generation (RAG) chatbot that answers questions based on y
 
 ## ✨ Features
 
-- 📄 **PDF Ingestion** — Upload PDF documents and automatically chunk them into searchable passages.
-- 🔍 **Semantic Search** — Uses vector embeddings + ChromaDB for similarity-based retrieval.
-- 💬 **Conversational Memory** — Remembers previous turns and resolves pronouns (e.g., "what about the second point?").
-- 🌊 **Streaming Responses** — Answers appear token-by-token in real-time via `st.write_stream`.
-- 📚 **Source Citations** — Every answer is traced back to the exact page in the original PDF.
-- 🎨 **Clean UI** — Responsive Streamlit interface with chat history and sidebar controls.
+## Features
+- Upload PDF documents and build a knowledge base.
+- Ask questions with source citations (Source, Page).
+- Chat memory using LangChain's `RunnableWithMessageHistory`.
+- Cross-Encoder Reranking for better retrieval accuracy.
+
 
 ---
 
@@ -67,6 +67,12 @@ A Retrieval-Augmented Generation (RAG) chatbot that answers questions based on y
 
 ---
 
+
+## Architecture Notes
+- Uses LangChain LCEL (`create_retrieval_chain`, `create_history_aware_retriever`) instead of the deprecated `RetrievalQA`.
+- Embeddings are generated via API Ninjas; LLM inference via GapGPT.
+- Reranking is done locally with `sentence-transformers` (`ms-marco-MiniLM-L-6-v2`).
+---
 ## ⚙️ Prerequisites
 
 - Python 3.10 or higher
